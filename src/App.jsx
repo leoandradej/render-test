@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Footer from "./components/Footer";
 import LoginForm from "./components/LoginForm";
 import Note from "./components/Note";
@@ -16,6 +16,7 @@ const App = () => {
     const loggedUserJSON = window.localStorage.getItem("loggedNoteappUser");
     return loggedUserJSON ? JSON.parse(loggedUserJSON) : null;
   });
+  const noteFormRef = useRef();
 
   useEffect(() => {
     const fetchNotes = async () => {
@@ -31,28 +32,6 @@ const App = () => {
   }, []);
 
   if (user) noteService.setToken(user.token);
-
-  const addNote = async (noteObject) => {
-    const returnedNote = await noteService.create(noteObject);
-    setNotes((prevNotes) => prevNotes.concat(returnedNote));
-  };
-
-  const toggleImportance = async (id) => {
-    const note = notes.find((note) => note.id === id);
-    const changedNote = { ...note, important: !note.important };
-
-    try {
-      const returnedNote = await noteService.update(id, changedNote);
-      setNotes(notes.map((note) => (note.id === id ? returnedNote : note)));
-    } catch (error) {
-      console.error("Failed to update note:", error);
-      setErrorMessage(`Note '${note.content}' was already removed from server`);
-      setTimeout(() => {
-        setErrorMessage(null);
-      }, 5000);
-      setNotes(notes.filter((note) => note.id !== id));
-    }
-  };
 
   const login = async (loginObject) => {
     try {
@@ -74,6 +53,29 @@ const App = () => {
     setUser(null);
   };
 
+  const addNote = async (noteObject) => {
+    noteFormRef.current.toggleVisibility();
+    const returnedNote = await noteService.create(noteObject);
+    setNotes((prevNotes) => prevNotes.concat(returnedNote));
+  };
+
+  const toggleImportance = async (id) => {
+    const note = notes.find((note) => note.id === id);
+    const changedNote = { ...note, important: !note.important };
+
+    try {
+      const returnedNote = await noteService.update(id, changedNote);
+      setNotes(notes.map((note) => (note.id === id ? returnedNote : note)));
+    } catch (error) {
+      console.error("Failed to update note:", error);
+      setErrorMessage(`Note '${note.content}' was already removed from server`);
+      setTimeout(() => {
+        setErrorMessage(null);
+      }, 5000);
+      setNotes(notes.filter((note) => note.id !== id));
+    }
+  };
+
   const notesToShow = showAll ? notes : notes.filter((note) => note.important);
 
   return (
@@ -89,9 +91,11 @@ const App = () => {
 
       {user && (
         <div>
-          <p>{user.name} logged in</p>
-          <button onClick={handleLogout}>logout</button>
-          <Togglable buttonLabel="new note">
+          <div>
+            <p>{user.name} logged in</p>
+            <button onClick={handleLogout}>logout</button>
+          </div>
+          <Togglable buttonLabel="new note" ref={noteFormRef}>
             <NoteForm createNote={addNote} />
           </Togglable>
         </div>

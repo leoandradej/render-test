@@ -7,13 +7,41 @@ const helper = require('./test_helper');
 const Note = require('../models/note');
 const bcrypt = require('bcrypt');
 const User = require('../models/user');
+const { default: notes } = require('../../src/services/notes');
+const note = require('../models/note');
 
 const api = supertest(app);
 
 describe('when there is initially some notes saved', () => {
+  let token;
+  let userId;
+
   beforeEach(async () => {
     await Note.deleteMany({});
-    await Note.insertMany(helper.initialNotes);
+    await User.deleteMany({});
+
+    const passwordHash = await bcrypt.hash('testpassword', 10);
+    const user = new User({
+      username: 'testuser',
+      name: 'Test User',
+      passwordHash,
+    });
+
+    const savedUser = await user.save();
+    userId = savedUser._id.toString();
+
+    const loginResponse = await api
+      .post('/api/login')
+      .send({ username: 'testuser', password: 'testpassword' });
+
+    token = loginResponse.body.token;
+
+    const notesWithUser = helper.initialNotes.map(note => ({
+      ...note,
+      user: userId,
+    }));
+
+    await Note.insertMany(notesWithUser);
   });
 
   test('notes are returned as json', async () => {
@@ -47,7 +75,9 @@ describe('when there is initially some notes saved', () => {
         .expect(200)
         .expect('Content-Type', /application\/json/);
 
-      assert.deepStrictEqual(resultNote.body, noteToView);
+      assert.strictEqual(resultNote.body.content, noteToView.content);
+      assert.strictEqual(resultNote.body.important, noteToView.important);
+      assert.strictEqual(resultNote.body.id, noteToView.id);
     });
 
     test('fails with status code 404 if note does not exist', async () => {
@@ -64,7 +94,7 @@ describe('when there is initially some notes saved', () => {
   });
 
   describe('addition of a new note', () => {
-    test('success with valid data', async () => {
+    test('success with valid data and token', async () => {
       const newNote = {
         content: 'async/await simplifies making async calls',
         important: true,
@@ -73,6 +103,7 @@ describe('when there is initially some notes saved', () => {
 
       await api
         .post('/api/notes')
+        .set('Authorization', `Bearer ${token}`)
         .send(newNote)
         .expect(201)
         .expect('Content-Type', /application\/json/);
@@ -85,12 +116,46 @@ describe('when there is initially some notes saved', () => {
       assert(contents.includes('async/await simplifies making async calls'));
     });
 
+    test('fails with status 401 if token is not provided', async () => {
+      const newNote = {
+        content: 'Note without token',
+        important: true,
+      };
+
+      const result = await api.post('/api/notes').send(newNote).expect(401);
+
+      assert(result.body.error.includes('token'));
+
+      const notesAtEnd = await helper.notesInDb();
+      assert.strictEqual(notesAtEnd.length, helper.initialNotes.length);
+    });
+
+    test('fails with status code 401 if token is invalid', async () => {
+      const newNote = {
+        content: 'Note without token',
+        impotant: true,
+      };
+
+      await api
+        .post('/api/notes')
+        .set('Authotization', 'Bearer invalidtoken123')
+        .send(newNote)
+        .expect(401);
+
+      const notesAtEnd = await helper.notesInDb();
+      assert.strictEqual(notesAtEnd.length, helper.initialNotes.length);
+    });
+
     test('fails with status code 400 if data is invalid', async () => {
       const newNote = {
         important: true,
       };
 
-      await api.post('/api/notes').send(newNote).expect(400);
+      await api
+        .post('/api/notes')
+        .set('Authorization', `Bearer ${token}`)
+        .send(newNote)
+        .expect(400);
 
       const notesAtEnd = await helper.notesInDb();
 
